@@ -1,0 +1,21 @@
+# Ignore JSON and CSV files
+*.json
+*.jsonl
+*.csv
+*.txt
+*.xml
+*.log
+
+# Ignore any hidden system files (optional)
+.DS_Store
+Thumbs.db
+
+# Ignore Python cache files
+__pycache__/
+*.py[cod]
+
+# Ignore virtual environments (optional)
+env/
+venv/
+
+openaibatches/
