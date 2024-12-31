@@ -6,6 +6,8 @@
 *.xml
 *.log
 
+.env
+
 # Ignore any hidden system files (optional)
 .DS_Store
 Thumbs.db
