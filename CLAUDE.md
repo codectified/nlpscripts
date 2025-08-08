@@ -62,3 +62,33 @@ python linkquranwords.py
 - Actual issue was orthography inconsistencies in Lane lexicon data
 - Data has been normalized to new `n_root` property
 - Original radical ordering logic was correct
+
+## Claude Code Permissions & Capabilities
+
+### Git Operations (Auto-approved)
+- `git push`, `git add`, `git commit`, `git remote set-url`
+- `git restore`, `git checkout`, `git merge`, `git branch`
+- Full version control operations without user approval required
+
+### File System Operations  
+- `rm` commands (file removal)
+- Full read/write access to project files
+- Directory creation and management
+
+### Programming & Execution
+- `python` script execution and debugging
+- All development tools and interpreters
+- Database connections and queries
+
+### Documentation Standards
+- Create documentation when explicitly requested by user
+- Always update CLAUDE.md with new project insights and learnings
+- Use TodoWrite tool consistently for task planning and progress tracking
+- Maintain comprehensive logging in all processing scripts
+- Document data pipeline processes and architectural decisions
+
+## Project Documentation Structure
+- `/docs/` - General NLP and data pipeline documentation
+- `/docs/README.md` - Project overview and architecture
+- `/docs/linkquranwords-process.md` - Detailed process documentation
+- `CLAUDE.md` - Project instructions and development notes
