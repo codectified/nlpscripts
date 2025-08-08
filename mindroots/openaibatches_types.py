@@ -86,21 +86,27 @@ def retrieve_batch_results(output_file_id, output_file_name="batch_output.jsonl"
     print(f"Batch results saved to '{output_file_name}'.")
 
 # Step 7: Process the results and classify the words
-def process_batch_results(output_file_name="batch_output.jsonl", words_data=None):
+def process_batch_results(output_file_name="batch_output.jsonl"):
+    """
+    Read each JSONL line from the batch output, parse the JSON string returned
+    by the model, and return a list of tuples:
+      (entry_id, wazn, form)
+    """
+    results = []
     with open(output_file_name, 'r', encoding='utf-8') as f:
         for line in f:
-            result = json.loads(line)
-            custom_id = result['custom_id']
-            classification = result['response']['body']['choices'][0]['message']['content'].strip()
-
-            # The custom_id is "request-{idx}", so we'll split by "-" and get the index
-            request_index = int(custom_id.split("-")[1])
-
-            # Retrieve the corresponding Arabic word from words_data using the index
-            arabic_word = words_data[request_index]
-
-            # Print the Arabic word alongside its classification
-            print(f"Arabic Word: {arabic_word} | Classification: {classification}")
+            record = json.loads(line)
+            try:
+                content_json = record["response"]["body"]["choices"][0]["message"]["content"].strip()
+                parsed = json.loads(content_json)
+                entry_id = parsed["id"]
+                wazn     = parsed["wazn"]
+                form     = parsed["form"]
+                results.append((entry_id, wazn, form))
+                print(f"{entry_id:10} | {wazn:20} | {form}")
+            except (json.JSONDecodeError, KeyError) as e:
+                print(f"Skipping malformed line: {e}")
+    return results
 
 
 

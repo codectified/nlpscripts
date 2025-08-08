@@ -19,13 +19,16 @@ class RootUpdater:
 
     def initialize_counters(self):
         print("Initializing counters for root types...")
-        root_types = ["Geminate", "Triliteral", "Quadriliteral", "Quintiliteral", "Hexaliteral", "Heptaliteral", "BeyondSeptiliteral"]
+        root_types = [
+            "Geminate", "Triliteral", "Quadriliteral",
+            "Quintiliteral", "Hexaliteral", "Heptaliteral", "BeyondSeptiliteral"
+        ]
         for root_type in root_types:
             # Query the database for the highest existing ID for each root type
             result = self.graph.run(
                 f"""
                 MATCH (r:Root)
-                WHERE r.root_type = $root_type AND EXISTS(r.{root_type}_ID)
+                WHERE r.root_type = $root_type AND r.{root_type}_ID IS NOT NULL
                 RETURN MAX(r.{root_type}_ID) AS max_id
                 """,
                 root_type=root_type
@@ -42,14 +45,14 @@ class RootUpdater:
             root_id = record['id']
             arabic = record['arabic']
             
-            # Split into letters and reverse for RTL order
-            letters = arabic.split('-')[::-1]  # Reverse for RTL
-            unique_letters = list(dict.fromkeys(letters))  # Remove duplicates for classification
+            # Split the Arabic property directly without reversal
+            letters = arabic.split('-')  # No reversal needed
             
-            # Assign r1, r2, r3, ... based on RTL order
+            # Assign r1, r2, r3, ... directly based on the order in the `arabic` property
             r_properties = {f"r{i+1}": letter for i, letter in enumerate(letters)}
             
             # Determine the root type and its corresponding ID
+            unique_letters = list(dict.fromkeys(letters))  # Remove duplicates for classification
             root_type, type_id_field = self.get_root_type_and_field(unique_letters)
 
             # Increment the counter for this root type
@@ -83,6 +86,10 @@ class RootUpdater:
         print("\nProcessing completed!")
 
     def get_root_type_and_field(self, unique_letters):
+        """
+        Classifies the root based on the number of unique letters and 
+        determines the appropriate root type and ID field.
+        """
         count = len(unique_letters)
         if count == 2:  # Geminate
             return 'Geminate', 'Geminate_ID'

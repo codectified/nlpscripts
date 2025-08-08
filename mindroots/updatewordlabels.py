@@ -1,6 +1,5 @@
 import csv
 from neo4j import GraphDatabase
-
 from dotenv import load_dotenv
 import os
 
@@ -19,38 +18,42 @@ if not all([uri, user, password]):
 # Connect to Neo4j
 driver = GraphDatabase.driver(uri, auth=(user, password))
 
-# Function to update the type property of Word nodes
-def update_word_node(tx, entry_id, type_value):
+# Function to update the new English label while preserving the old one
+def update_word_node(tx, entry_id, english_new, spanish, urdu, transliteration):
     query = """
     MATCH (w:Word {entry_id: $entry_id})
-    SET w.type = $type_value
+    SET w.english_2 = $english_new,
+        w.spanish = $spanish,
+        w.urdu = $urdu,
+        w.transliteration = $transliteration
     """
-    tx.run(query, entry_id=entry_id, type_value=type_value)
+    tx.run(query, entry_id=entry_id, english_new=english_new, 
+           spanish=spanish, urdu=urdu, transliteration=transliteration)
 
-# Function to process each CSV file and update Neo4j with logging
+# Function to process **final_translations.csv** and update Neo4j with logging
 def update_neo4j_from_csv(csv_file_path):
     with open(csv_file_path, newline='', encoding='utf-8') as csvfile:
         reader = csv.DictReader(csvfile)
         with driver.session() as session:
             for i, row in enumerate(reader, start=1):
                 entry_id = row['entry_id_xml']
-                type_value = row['type']
-                session.execute_write(update_word_node, entry_id, type_value)
+                english_new = row['english']
+                spanish = row['spanish']
+                urdu = row['urdu']
+                transliteration = row['transliteration']
 
-                # Log progress every 1000 words
+                session.execute_write(update_word_node, entry_id, english_new, spanish, urdu, transliteration)
+
+                # Log progress every 1,000 words
                 if i % 1000 == 0:
                     print(f"Processed {i} words from '{csv_file_path}'")
 
     print(f"Finished processing and updating nodes from '{csv_file_path}'")
 
-# Main function to loop through all the CSV files
+# Main function to process final_translations.csv
 def main():
-    output_dir = "./"  # Directory where your mapped_output CSV files are located
-    num_batches = 10  # Number of batch output files
-
-    for batch_num in range(1, num_batches + 1):
-        csv_file_path = f"{output_dir}/mapped_output_{batch_num}.csv"
-        update_neo4j_from_csv(csv_file_path)
+    final_csv = "final_translations.csv"  # Single output file from batch processing
+    update_neo4j_from_csv(final_csv)
 
 if __name__ == "__main__":
     main()
