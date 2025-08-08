@@ -30,7 +30,9 @@ def update_roots(tx):
     query = f"""
     MATCH (ci:CorpusItem)
     WHERE ci.corpus_id = $corpus_id AND ci.root IS NULL
+    AND ({' OR '.join([f'ci.s{i}_root IS NOT NULL' for i in SEGMENT_RANGE])})
     RETURN elementId(ci) AS eid, {{ {', '.join([f's{i}_root: ci.s{i}_root' for i in SEGMENT_RANGE])} }} AS roots
+    ORDER BY elementId(ci)
     LIMIT $batch_size
     """
     results = tx.run(query, corpus_id=CORPUS_ID, batch_size=BATCH_SIZE)
