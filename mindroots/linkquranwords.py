@@ -46,12 +46,12 @@ def link_items(tx):
     failed = 0
     
     try:
-        # Pull a batch of CorpusItems that have a normalized root and no existing link
+        # Pull a batch of CorpusItems that have a root and no existing link
         result = tx.run("""
             MATCH (ci:CorpusItem)
-            WHERE ci.corpus_id = 2 AND ci.n_root IS NOT NULL
+            WHERE ci.corpus_id = 2 AND ci.root IS NOT NULL
               AND NOT (ci)-[:HAS_WORD]->(:Word)
-            RETURN ci.item_id AS item_id, ci.n_root AS root, ci.lemma AS lemma
+            RETURN ci.item_id AS item_id, ci.root AS root, ci.lemma AS lemma
             LIMIT 50
         """)
         
@@ -68,11 +68,15 @@ def link_items(tx):
             lemma = record['lemma']
             lemma_no_diacritics = strip_diacritics(lemma)
 
-            logger.info(f"Processing item {item_id}: lemma='{lemma}' -> '{lemma_no_diacritics}', n_root='{root}'")
+            logger.info(f"Processing item {item_id}: lemma='{lemma}' -> '{lemma_no_diacritics}', root='{root}'")
 
-            # Validate root exists first
+            # Validate root exists first - check both arabic and n_root properties
             logger.debug(f"🔍 Searching for root: '{root}'")
-            root_check = tx.run("MATCH (r:Root {arabic: $root}) RETURN r", root=root).single()
+            root_check = tx.run("""
+                MATCH (r:Root) 
+                WHERE r.arabic = $root OR r.n_root = $root 
+                RETURN r
+            """, root=root).single()
             if not root_check:
                 logger.warning(f"❌ Root '{root}' not found for item {item_id}")
                 failed += 1
@@ -83,8 +87,9 @@ def link_items(tx):
             # Try to find existing word node under root
             logger.debug(f"🔍 Searching for word '{lemma_no_diacritics}' under root '{root}'")
             word_match = tx.run("""
-                MATCH (r:Root {arabic: $root})-[:HAS_WORD]->(w:Word)
-                WHERE w.arabic_no_diacritics = $lemma_no_diacritics
+                MATCH (r:Root)-[:HAS_WORD]->(w:Word)
+                WHERE (r.arabic = $root OR r.n_root = $root) 
+                  AND w.arabic_no_diacritics = $lemma_no_diacritics
                 RETURN w LIMIT 1
             """, root=root, lemma_no_diacritics=lemma_no_diacritics).single()
 
@@ -92,15 +97,16 @@ def link_items(tx):
                 tx.run("""
                     MATCH (ci:CorpusItem {item_id: $item_id})
                     MATCH (w:Word)
-                    WHERE id(w) = $wid
+                    WHERE elementId(w) = $wid
                     MERGE (ci)-[:HAS_WORD]->(w)
-                """, item_id=item_id, wid=word_match['w'].id)
-                logger.info(f"✅ Linked item {item_id} to existing Word (id: {word_match['w'].id})")
+                """, item_id=item_id, wid=word_match['w'].element_id)
+                logger.info(f"✅ Linked item {item_id} to existing Word (id: {word_match['w'].element_id})")
                 matched += 1
             else:
                 # Create new Word node under that root
                 word_create = tx.run("""
-                    MATCH (r:Root {arabic: $root})
+                    MATCH (r:Root)
+                    WHERE r.arabic = $root OR r.n_root = $root
                     CREATE (w:Word {
                         arabic: $lemma,
                         arabic_no_diacritics: $lemma_no_diacritics,
@@ -116,10 +122,10 @@ def link_items(tx):
                     tx.run("""
                         MATCH (ci:CorpusItem {item_id: $item_id})
                         MATCH (w:Word)
-                        WHERE id(w) = $wid
+                        WHERE elementId(w) = $wid
                         MERGE (ci)-[:HAS_WORD]->(w)
-                    """, item_id=item_id, wid=word_create['w'].id)
-                    logger.info(f"🆕 Created and linked item {item_id} to new Word (id: {word_create['w'].id})")
+                    """, item_id=item_id, wid=word_create['w'].element_id)
+                    logger.info(f"🆕 Created and linked item {item_id} to new Word (id: {word_create['w'].element_id})")
                     created += 1
                 else:
                     logger.error(f"❌ Failed to create word for item {item_id}")
