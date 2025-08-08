@@ -8,9 +8,25 @@ import logging
 
 load_dotenv()
 
-# Setup logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# Setup dual logging (file and console)
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+# File handler
+file_handler = logging.FileHandler('linkquranwords.log')
+file_handler.setLevel(logging.INFO)
+file_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+file_handler.setFormatter(file_formatter)
+
+# Console handler
+console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.INFO)
+console_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+console_handler.setFormatter(console_formatter)
+
+# Add handlers to logger
+logger.addHandler(file_handler)
+logger.addHandler(console_handler)
 
 uri = os.getenv('NEO4J_URI')
 user = os.getenv('NEO4J_USER')
@@ -30,12 +46,12 @@ def link_items(tx):
     failed = 0
     
     try:
-        # Pull a batch of CorpusItems that have a root and no existing link
+        # Pull a batch of CorpusItems that have a normalized root and no existing link
         result = tx.run("""
             MATCH (ci:CorpusItem)
-            WHERE ci.corpus_id = 2 AND ci.root IS NOT NULL
+            WHERE ci.corpus_id = 2 AND ci.n_root IS NOT NULL
               AND NOT (ci)-[:HAS_WORD]->(:Word)
-            RETURN ci.item_id AS item_id, ci.root AS root, ci.lemma AS lemma
+            RETURN ci.item_id AS item_id, ci.n_root AS root, ci.lemma AS lemma
             LIMIT 50
         """)
         
@@ -52,16 +68,20 @@ def link_items(tx):
             lemma = record['lemma']
             lemma_no_diacritics = strip_diacritics(lemma)
 
-            logger.info(f"Processing item {item_id}: lemma='{lemma}' -> '{lemma_no_diacritics}', root='{root}'")
+            logger.info(f"Processing item {item_id}: lemma='{lemma}' -> '{lemma_no_diacritics}', n_root='{root}'")
 
             # Validate root exists first
+            logger.debug(f"🔍 Searching for root: '{root}'")
             root_check = tx.run("MATCH (r:Root {arabic: $root}) RETURN r", root=root).single()
             if not root_check:
                 logger.warning(f"❌ Root '{root}' not found for item {item_id}")
                 failed += 1
                 continue
+            else:
+                logger.debug(f"✅ Found root: '{root}'")
 
             # Try to find existing word node under root
+            logger.debug(f"🔍 Searching for word '{lemma_no_diacritics}' under root '{root}'")
             word_match = tx.run("""
                 MATCH (r:Root {arabic: $root})-[:HAS_WORD]->(w:Word)
                 WHERE w.arabic_no_diacritics = $lemma_no_diacritics
