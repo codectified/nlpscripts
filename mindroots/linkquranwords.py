@@ -46,11 +46,12 @@ def link_items(tx):
     failed = 0
     
     try:
-        # Pull a batch of CorpusItems that have a root and no existing link
+        # Pull a batch of CorpusItems that have a root, no existing link, and haven't failed linking
         result = tx.run("""
             MATCH (ci:CorpusItem)
             WHERE ci.corpus_id = 2 AND ci.root IS NOT NULL
               AND NOT (ci)-[:HAS_WORD]->(:Word)
+              AND ci.link_failed IS NULL
             RETURN ci.item_id AS item_id, ci.root AS root, ci.lemma AS lemma
             LIMIT 50
         """)
@@ -79,6 +80,11 @@ def link_items(tx):
             """, root=root).single()
             if not root_check:
                 logger.warning(f"❌ Root '{root}' not found for item {item_id}")
+                # Mark this item as failed to avoid retrying it
+                tx.run("""
+                    MATCH (ci:CorpusItem {item_id: $item_id, corpus_id: 2})
+                    SET ci.link_failed = true, ci.link_failed_reason = 'root_not_found'
+                """, item_id=item_id)
                 failed += 1
                 continue
             else:
@@ -95,7 +101,7 @@ def link_items(tx):
 
             if word_match:
                 tx.run("""
-                    MATCH (ci:CorpusItem {item_id: $item_id})
+                    MATCH (ci:CorpusItem {item_id: $item_id, corpus_id: 2})
                     MATCH (w:Word)
                     WHERE elementId(w) = $wid
                     MERGE (ci)-[:HAS_WORD]->(w)
@@ -120,7 +126,7 @@ def link_items(tx):
 
                 if word_create:
                     tx.run("""
-                        MATCH (ci:CorpusItem {item_id: $item_id})
+                        MATCH (ci:CorpusItem {item_id: $item_id, corpus_id: 2})
                         MATCH (w:Word)
                         WHERE elementId(w) = $wid
                         MERGE (ci)-[:HAS_WORD]->(w)
@@ -129,6 +135,11 @@ def link_items(tx):
                     created += 1
                 else:
                     logger.error(f"❌ Failed to create word for item {item_id}")
+                    # Mark this item as failed to avoid retrying it
+                    tx.run("""
+                        MATCH (ci:CorpusItem {item_id: $item_id, corpus_id: 2})
+                        SET ci.link_failed = true, ci.link_failed_reason = 'word_creation_failed'
+                    """, item_id=item_id)
                     failed += 1
         
         logger.info(f"Batch complete - Matched: {matched}, Created: {created}, Failed: {failed}")

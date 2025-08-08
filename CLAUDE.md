@@ -49,6 +49,17 @@ python linkquranwords.py
 - Implemented proper exit conditions and statistics tracking
 - Enhanced batch processing with detailed progress reporting
 
+## Recent Fixes (2025-08-08)
+- **CRITICAL FIX**: Corrected property mapping in linkquranwords.py:
+  - CorpusItem nodes use `ci.root` (original property)
+  - Root nodes use `r.n_root` OR `r.arabic` (normalized property + fallback)
+  - Fixed query to match both arabic and n_root properties on Root nodes
+- Updated deprecated `id()` function calls to `elementId()` to eliminate warnings
+- Script now successfully processes ~50 items per batch, linking existing words and creating new ones
+- Identified that some roots need normalization (e.g., 'ع-س-ع-س' → 'ع-س-س') - separate script needed
+- **CRITICAL FIX**: Added `corpus_id: 2` filter to linking queries to prevent cross-corpus contamination
+- Added failed item tracking (`link_failed` property) to prevent infinite loops on persistently failing items
+
 ## Version Control Best Practices
 **Important:** Always use incremental commits and branching when working on code changes:
 - Create a new branch for each feature/fix: `git checkout -b feature/description`
@@ -60,8 +71,10 @@ python linkquranwords.py
 ## Data Notes
 - Root matching issues were initially thought to be letter ordering problems
 - Actual issue was orthography inconsistencies in Lane lexicon data
-- Data has been normalized to new `n_root` property
+- Data has been normalized to new `n_root` property on **Root nodes** (not CorpusItem nodes)
 - Original radical ordering logic was correct
+- Some roots still need normalization between corpus classifications vs Lane classifications
+- Quadriliteral roots like 'ع-س-ع-س' may need mapping to triliteral doubled forms 'ع-س-س'
 
 ## Claude Code Permissions & Capabilities
 
