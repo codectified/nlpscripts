@@ -35,6 +35,8 @@ password = os.getenv('NEO4J_PASS')
 driver = GraphDatabase.driver(uri, auth=(user, password))
 
 def strip_diacritics(text):
+    if text is None:
+        return None
     arabic_diacritics = re.compile(r'[\u064B-\u0652\u0653-\u0655]')
     text = unicodedata.normalize('NFKD', text)
     return arabic_diacritics.sub('', text)
@@ -68,6 +70,16 @@ def link_items(tx):
             root = record['root']
             lemma = record['lemma']
             lemma_no_diacritics = strip_diacritics(lemma)
+
+            # Skip items with null lemma
+            if lemma_no_diacritics is None:
+                logger.warning(f"❌ Item {item_id} has null lemma - marking as failed")
+                tx.run("""
+                    MATCH (ci:CorpusItem {item_id: $item_id, corpus_id: 2})
+                    SET ci.link_failed = true, ci.link_failed_reason = 'null_lemma'
+                """, item_id=item_id)
+                failed += 1
+                continue
 
             logger.info(f"Processing item {item_id}: lemma='{lemma}' -> '{lemma_no_diacritics}', root='{root}'")
 
