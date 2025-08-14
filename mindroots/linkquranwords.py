@@ -48,10 +48,10 @@ def link_items(tx):
     failed = 0
     
     try:
-        # Pull a batch of CorpusItems that have a root, no existing link, and haven't failed linking
+        # Pull a batch of CorpusItems that have a root, lemma, no existing link, and haven't failed linking
         result = tx.run("""
             MATCH (ci:CorpusItem)
-            WHERE ci.corpus_id = 2 AND ci.root IS NOT NULL
+            WHERE ci.corpus_id = 2 AND ci.root IS NOT NULL AND ci.lemma IS NOT NULL
               AND NOT (ci)-[:HAS_WORD]->(:Word)
               AND ci.link_failed IS NULL
             RETURN ci.item_id AS item_id, ci.root AS root, ci.lemma AS lemma
@@ -71,15 +71,6 @@ def link_items(tx):
             lemma = record['lemma']
             lemma_no_diacritics = strip_diacritics(lemma)
 
-            # Skip items with null lemma
-            if lemma_no_diacritics is None:
-                logger.warning(f"❌ Item {item_id} has null lemma - marking as failed")
-                tx.run("""
-                    MATCH (ci:CorpusItem {item_id: $item_id, corpus_id: 2})
-                    SET ci.link_failed = true, ci.link_failed_reason = 'null_lemma'
-                """, item_id=item_id)
-                failed += 1
-                continue
 
             logger.info(f"Processing item {item_id}: lemma='{lemma}' -> '{lemma_no_diacritics}', root='{root}'")
 
