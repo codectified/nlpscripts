@@ -30,8 +30,9 @@ Date: 2025-08-13
 
 import csv
 import logging
+import time
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Optional
 import os
 from neo4j import GraphDatabase
 from dotenv import load_dotenv
@@ -51,6 +52,11 @@ class SemiticRootsIntegrator:
             'errors': 0,
             'skipped': 0
         }
+        
+        # Throttling settings for Neo4j Aura
+        self.batch_size = 25  # Process in smaller batches
+        self.delay_between_batches = 2.0  # 2 second delay between batches
+        self.delay_between_operations = 0.1  # 100ms delay between individual operations
         
     def setup_logging(self):
         """Configure comprehensive logging."""
@@ -228,6 +234,8 @@ class SemiticRootsIntegrator:
                 if record:
                     self.logger.info(f"Updated existing root: {record['arabic']} with sem_id: {sem_id}")
                     self.stats['existing_updated'] += 1
+                    # Throttling for Aura
+                    time.sleep(self.delay_between_operations)
                 else:
                     self.logger.warning(f"Failed to update root with element ID: {root_element_id}")
                     
@@ -278,6 +286,8 @@ class SemiticRootsIntegrator:
                 if record:
                     self.logger.info(f"Created new root: {record['arabic']} with sem_id: {sem_id}")
                     self.stats['new_created'] += 1
+                    # Throttling for Aura
+                    time.sleep(self.delay_between_operations)
                 else:
                     self.logger.warning(f"Failed to create root: {root_data['arabic']}")
                     
@@ -294,9 +304,12 @@ class SemiticRootsIntegrator:
         """
         try:
             self.logger.info("Starting root processing...")
+            self.logger.info(f"Throttling settings: batch_size={self.batch_size}, batch_delay={self.delay_between_batches}s, op_delay={self.delay_between_operations}s")
             
             with open('sem_root.csv', 'r', encoding='utf-8') as f:
                 reader = csv.DictReader(f)
+                
+                batch_count = 0
                 
                 for i, row in enumerate(reader):
                     if limit and i >= limit:
@@ -329,6 +342,13 @@ class SemiticRootsIntegrator:
                             self.create_new_root(root_data, sem_id, concept)
                             
                         self.stats['total_processed'] += 1
+                        
+                        # Batch throttling for Neo4j Aura
+                        if self.stats['total_processed'] % self.batch_size == 0:
+                            batch_count += 1
+                            self.logger.info(f"Completed batch {batch_count} ({self.stats['total_processed']} roots processed)")
+                            self.logger.info(f"Pausing {self.delay_between_batches}s for Neo4j Aura throttling...")
+                            time.sleep(self.delay_between_batches)
                         
                         # Progress logging
                         if self.stats['total_processed'] % 50 == 0:
@@ -371,8 +391,8 @@ def main():
         # Load Arabic alphabet
         integrator.load_arabic_alphabet()
         
-        # Process roots (use limit=10 for testing, remove for full processing)
-        integrator.process_roots(limit=10)  # Remove limit parameter for full processing
+        # Process all roots (limit removed for full processing)
+        integrator.process_roots()
         
         # Print statistics
         integrator.print_statistics()
