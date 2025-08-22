@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 # File handler
-file_handler = logging.FileHandler('linkquranwords.log')
+file_handler = logging.FileHandler('../../../logs/linkquranwords.log')
 file_handler.setLevel(logging.INFO)
 file_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
 file_handler.setFormatter(file_formatter)
@@ -40,6 +40,33 @@ def strip_diacritics(text):
     arabic_diacritics = re.compile(r'[\u064B-\u0652\u0653-\u0655]')
     text = unicodedata.normalize('NFKD', text)
     return arabic_diacritics.sub('', text)
+
+def normalize_arabic(text):
+    """
+    Normalize Arabic text for better matching by handling orthographic variants.
+    This function:
+    1. Removes diacritics
+    2. Normalizes alif variants (إ, أ, آ → ا)
+    3. Normalizes ya variants (ى → ي)
+    4. Normalizes ta marbuta variants (ة → ه)
+    """
+    if text is None:
+        return None
+    
+    # First strip diacritics
+    text = strip_diacritics(text)
+    
+    # Normalize orthographic variants
+    # Alif variants: أ (hamza above), إ (hamza below), آ (madda) → ا (plain alif)
+    text = re.sub(r'[أإآ]', 'ا', text)
+    
+    # Ya variants: ى (alif maqsura) → ي (ya)
+    text = re.sub(r'ى', 'ي', text)
+    
+    # Ta marbuta: ة → ه (convert to ha for more consistent matching)
+    text = re.sub(r'ة', 'ه', text)
+    
+    return text
 
 def link_items(tx):
     # Statistics for this batch
@@ -70,9 +97,9 @@ def link_items(tx):
             root = record['root']
             lemma = record['lemma']
             lemma_no_diacritics = strip_diacritics(lemma)
+            lemma_normalized = normalize_arabic(lemma)
 
-
-            logger.info(f"Processing item {item_id}: lemma='{lemma}' -> '{lemma_no_diacritics}', root='{root}'")
+            logger.info(f"Processing item {item_id}: lemma='{lemma}' -> no_diacritics='{lemma_no_diacritics}', normalized='{lemma_normalized}', root='{root}'")
 
             # Validate root exists first - check both arabic and n_root properties
             logger.debug(f"🔍 Searching for root: '{root}'")
@@ -93,14 +120,15 @@ def link_items(tx):
             else:
                 logger.debug(f"✅ Found root: '{root}'")
 
-            # Try to find existing word node under root
-            logger.debug(f"🔍 Searching for word '{lemma_no_diacritics}' under root '{root}'")
+            # Try to find existing word node under root using both original and normalized matching
+            logger.debug(f"🔍 Searching for word no_diacritics='{lemma_no_diacritics}' or normalized='{lemma_normalized}' under root '{root}'")
             word_match = tx.run("""
                 MATCH (r:Root)-[:HAS_WORD]->(w:Word)
                 WHERE (r.arabic = $root OR r.n_root = $root) 
-                  AND w.arabic_no_diacritics = $lemma_no_diacritics
+                  AND (w.arabic_no_diacritics = $lemma_no_diacritics
+                       OR w.arabic_normalized = $lemma_normalized)
                 RETURN w LIMIT 1
-            """, root=root, lemma_no_diacritics=lemma_no_diacritics).single()
+            """, root=root, lemma_no_diacritics=lemma_no_diacritics, lemma_normalized=lemma_normalized).single()
 
             if word_match:
                 tx.run("""
@@ -113,19 +141,21 @@ def link_items(tx):
                 matched += 1
             else:
                 # Create new Word node under that root
+                lemma_normalized = normalize_arabic(lemma)
                 word_create = tx.run("""
                     MATCH (r:Root)
                     WHERE r.arabic = $root OR r.n_root = $root
                     CREATE (w:Word {
                         arabic: $lemma,
                         arabic_no_diacritics: $lemma_no_diacritics,
+                        arabic_normalized: $lemma_normalized,
                         generated: true,
                         node_type: "Word",
                         type: "word"
                     })
                     CREATE (r)-[:HAS_WORD]->(w)
                     RETURN w
-                """, root=root, lemma=lemma, lemma_no_diacritics=lemma_no_diacritics).single()
+                """, root=root, lemma=lemma, lemma_no_diacritics=lemma_no_diacritics, lemma_normalized=lemma_normalized).single()
 
                 if word_create:
                     tx.run("""

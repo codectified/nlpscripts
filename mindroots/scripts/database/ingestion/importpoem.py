@@ -149,7 +149,7 @@ def process_csv_and_import_to_neo4j(csv_file, unmatched_log, max_rows=None, batc
 # Main function
 def main():
     csv_file = "poem_output_for_graphdb.csv"
-    with open('unmatched_words.log', 'a') as unmatched_log:
+    with open('../../../logs/unmatched_words.log', 'a') as unmatched_log:
         max_rows = 1000  # Process only the first 1000 rows for testing
         process_csv_and_import_to_neo4j(csv_file, unmatched_log)
 
