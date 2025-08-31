@@ -26,10 +26,16 @@ def update_batch(tx, batch_size=500):
     query = """
     MATCH (ci:CorpusItem)
     WHERE ci.corpus_id = 2
-    AND (
-      any(val IN [ci.s1_lemma_norm, ci.s2_lemma_norm, ci.s3_lemma_norm, ci.s4_lemma_norm, ci.s5_lemma_norm]
-          WHERE val =~ '.*[\\^#].*')
-    )
+      // Only process nodes that still have dirty characters
+      AND any(val IN [
+        ci.s1_lemma_norm, ci.s2_lemma_norm, ci.s3_lemma_norm,
+        ci.s4_lemma_norm, ci.s5_lemma_norm
+      ] WHERE val =~ '.*[\\^#].*')
+      // Skip nodes that have already been cleaned
+      AND any(cleaned IN [
+        ci.s1_lemma_cleaned, ci.s2_lemma_cleaned, ci.s3_lemma_cleaned,
+        ci.s4_lemma_cleaned, ci.s5_lemma_cleaned
+      ] WHERE cleaned IS NULL)
     RETURN ci.item_id AS item_id,
            ci.s1_lemma_norm AS s1, ci.s2_lemma_norm AS s2,
            ci.s3_lemma_norm AS s3, ci.s4_lemma_norm AS s4,
@@ -42,9 +48,9 @@ def update_batch(tx, batch_size=500):
     for record in result:
         item_id = record["item_id"]
         cleaned = {}
-        for i in range(1, 6):
+        for i in range(1, 5+1):
             val = record.get(f"s{i}")
-            if val and ("^" in val or "#" in val):  # only if dirty
+            if val and ("^" in val or "#" in val):  # only clean dirty values
                 cleaned[f"s{i}_lemma_cleaned"] = clean_lemma(val)
         if cleaned:
             updates.append((item_id, cleaned))
@@ -58,7 +64,6 @@ def update_batch(tx, batch_size=500):
         """, **params)
 
     return len(updates)
-
 
 # --- Main ---
 def main():
