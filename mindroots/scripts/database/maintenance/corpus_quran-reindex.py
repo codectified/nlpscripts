@@ -18,11 +18,9 @@ driver = GraphDatabase.driver(uri, auth=(user, password))
 # --- Logging ---
 logger = logging.getLogger("reindexer")
 logger.setLevel(logging.INFO)
-
 fh = logging.FileHandler("reindex_corpus2.log", encoding="utf-8")
 fh.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
 logger.addHandler(fh)
-
 ch = logging.StreamHandler()
 ch.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
 logger.addHandler(ch)
@@ -56,7 +54,6 @@ def normalize_arabic(text: str) -> str:
     text = re.sub(r'ئ', 'ي', text)
     return text
 
-# --- Helpers ---
 def parse_location(loc: str):
     """Parse (s:a:w:s) location → ints"""
     s, a, w, seg = loc.strip("()").split(":")
@@ -64,10 +61,11 @@ def parse_location(loc: str):
 
 # --- Neo4j Write ---
 def write_batch(tx, batch):
+    grouped = {}
     for row in batch:
         surah, ayah, word, seg, form, tag, feats = row
 
-        # Extract lemma + root from features string
+        # Extract lemma + root (raw Buckwalter)
         lemma_match = re.search(r"LEM:([^|]+)", feats)
         root_match = re.search(r"ROOT:([^|]+)", feats)
         lemma_bw = lemma_match.group(1) if lemma_match else None
@@ -80,32 +78,78 @@ def write_batch(tx, batch):
         item_id = f"{surah}:{ayah}:{word}"
         seg_form = f"s{seg}_form"
         seg_arabic = f"s{seg}_arabic"
+        seg_tag = f"s{seg}_tag"
+        seg_feats = f"s{seg}_features"
         seg_lemma = f"s{seg}_lemma"
         seg_lemma_norm = f"s{seg}_lemma_norm"
         seg_root = f"s{seg}_root"
 
-        tx.run(f"""
-            MERGE (c:Corpus {{corpus_id: 2}})
-            MERGE (s:Surah {{corpus_id: 2, surah_id: $surah}})
+        if item_id not in grouped:
+            grouped[item_id] = {
+                "surah": surah,
+                "ayah": ayah,
+                "segments": [],
+                "updates": []
+            }
+
+        grouped[item_id]["segments"].append(bw_to_arabic(form) or form)
+        grouped[item_id]["updates"].append((
+            seg_form, form,
+            seg_arabic, bw_to_arabic(form),
+            seg_tag, tag,
+            seg_feats, feats,
+            seg_lemma, lemma_bw,
+            seg_lemma_norm, lemma_norm,
+            seg_root, root_bw,
+            root_ar
+        ))
+
+    # Write to Neo4j
+    for item_id, data in grouped.items():
+        surah = data["surah"]
+        ayah = data["ayah"]
+        full_arabic = " ".join([seg for seg in data["segments"] if seg])
+
+        # Base structure
+        tx.run("""
+            MERGE (c:Corpus {corpus_id: 2})
+            MERGE (s:Surah {corpus_id: 2, surah_id: $surah})
               ON CREATE SET s.node_type = "Surah"
-            MERGE (a:Ayah {{corpus_id: 2, surah_id: $surah, ayah_id: $ayah}})
+            MERGE (a:Ayah {corpus_id: 2, surah_id: $surah, ayah_id: $ayah})
               ON CREATE SET a.node_type = "Ayah"
             MERGE (c)-[:HAS_SURAH]->(s)
             MERGE (s)-[:HAS_AYAH]->(a)
-            MERGE (ci:CorpusItem {{corpus_id: 2, item_id: $item_id}})
+            MERGE (ci:CorpusItem {corpus_id: 2, item_id: $item_id})
               ON CREATE SET ci.node_type = "CorpusItem"
             MERGE (a)-[:HAS_ITEM]->(ci)
-            SET ci.`{seg_form}` = $form,
-                ci.`{seg_arabic}` = $form_ar,
-                ci.`{seg_lemma}` = $lemma_bw,
-                ci.`{seg_lemma_norm}` = $lemma_norm,
-                ci.`{seg_root}` = $root_bw,
-                ci.root = CASE WHEN $root_ar IS NOT NULL THEN $root_ar ELSE ci.root END
-        """, surah=surah, ayah=ayah, item_id=item_id,
-             form=form, form_ar=bw_to_arabic(form),
-             lemma_bw=lemma_bw, lemma_norm=lemma_norm,
-             root_bw=root_bw, root_ar=root_ar)
+            SET ci.full_arabic = $full_arabic
+        """, surah=surah, ayah=ayah, item_id=item_id, full_arabic=full_arabic)
 
+        # Segment properties
+        for (seg_form, form,
+             seg_arabic, form_ar,
+             seg_tag, tag,
+             seg_feats, feats,
+             seg_lemma, lemma_bw,
+             seg_lemma_norm, lemma_norm,
+             seg_root, root_bw,
+             root_ar) in data["updates"]:
+            tx.run(f"""
+                MATCH (ci:CorpusItem {{corpus_id: 2, item_id: $item_id}})
+                SET ci.`{seg_form}` = $form,
+                    ci.`{seg_arabic}` = $form_ar,
+                    ci.`{seg_tag}` = $tag,
+                    ci.`{seg_feats}` = $feats,
+                    ci.`{seg_lemma}` = $lemma_bw,
+                    ci.`{seg_lemma_norm}` = $lemma_norm,
+                    ci.`{seg_root}` = $root_bw,
+                    ci.root = CASE WHEN $root_ar IS NOT NULL THEN $root_ar ELSE ci.root END
+            """, item_id=item_id,
+                 form=form, form_ar=form_ar,
+                 tag=tag, feats=feats,
+                 lemma_bw=lemma_bw, lemma_norm=lemma_norm,
+                 root_bw=root_bw, root_ar=root_ar)
+            
 # --- Main ---
 def reindex_tsv(tsv_path, batch_size=500, throttle=0.1):
     total = 0
@@ -140,6 +184,6 @@ def reindex_tsv(tsv_path, batch_size=500, throttle=0.1):
 if __name__ == "__main__":
     import sys
     if len(sys.argv) < 2:
-        print("Usage: python reindex_corpus2.py <path_to_tsv>")
+        print("Usage: python corpus_quran-reindex.py <path_to_tsv>")
     else:
         reindex_tsv(sys.argv[1])
