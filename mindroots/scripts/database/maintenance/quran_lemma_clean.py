@@ -1,5 +1,5 @@
-import re
 import time
+import re
 from neo4j import GraphDatabase
 from dotenv import load_dotenv
 import os
@@ -26,6 +26,7 @@ logger.addHandler(ch)
 
 # --- Cleaning function ---
 def clean_lemma(text: str) -> str:
+    """Remove leftover Buckwalter oddities (^, #)"""
     if not text:
         return None
     return text.replace("^", "").replace("#", "ئ")
@@ -36,13 +37,11 @@ def update_batch(tx, batch_size=500):
     MATCH (ci:CorpusItem)
     WHERE ci.corpus_id = 2 AND ci.lemma IS NULL
     RETURN ci.item_id AS item_id,
-           ci.s1_lemma AS s1_lemma, ci.s1_lemma_norm AS s1_norm,
-           ci.s2_lemma AS s2_lemma, ci.s2_lemma_norm AS s2_norm,
-           ci.s3_lemma AS s3_lemma, ci.s3_lemma_norm AS s3_norm,
-           ci.s4_lemma AS s4_lemma, ci.s4_lemma_norm AS s4_norm,
-           ci.s5_lemma AS s5_lemma, ci.s5_lemma_norm AS s5_norm,
-           ci.s6_lemma AS s6_lemma, ci.s6_lemma_norm AS s6_norm,
-           ci.s7_lemma AS s7_lemma, ci.s7_lemma_norm AS s7_norm
+           ci.s1_lemma AS s1_lemma, ci.s1_lemma_norm AS s1_norm, ci.s1_lemma_cleaned AS s1_clean,
+           ci.s2_lemma AS s2_lemma, ci.s2_lemma_norm AS s2_norm, ci.s2_lemma_cleaned AS s2_clean,
+           ci.s3_lemma AS s3_lemma, ci.s3_lemma_norm AS s3_norm, ci.s3_lemma_cleaned AS s3_clean,
+           ci.s4_lemma AS s4_lemma, ci.s4_lemma_norm AS s4_norm, ci.s4_lemma_cleaned AS s4_clean,
+           ci.s5_lemma AS s5_lemma, ci.s5_lemma_norm AS s5_norm, ci.s5_lemma_cleaned AS s5_clean
     LIMIT $batch_size
     """
     result = tx.run(query, batch_size=batch_size)
@@ -52,16 +51,23 @@ def update_batch(tx, batch_size=500):
         item_id = record["item_id"]
         lemma_val = None
 
-        # Loop over segments s1–s7
-        for i in range(1, 8):
+        # Check each segment in order (s1 → s5)
+        for i in range(1, 6):
+            lemma_clean = record.get(f"s{i}_clean")
             lemma_norm = record.get(f"s{i}_norm")
             lemma_raw = record.get(f"s{i}_lemma")
-            if lemma_norm or lemma_raw:
-                lemma_val = lemma_norm if lemma_norm else lemma_raw
+
+            if lemma_clean:
+                lemma_val = lemma_clean
+                break
+            elif lemma_norm:
+                lemma_val = clean_lemma(lemma_norm)
+                break
+            elif lemma_raw:
+                lemma_val = clean_lemma(lemma_raw)
                 break
 
         if lemma_val:
-            lemma_val = clean_lemma(lemma_val)
             updates.append((item_id, lemma_val))
 
     # Apply updates
@@ -74,10 +80,9 @@ def update_batch(tx, batch_size=500):
 
     return len(updates)
 
-
-# --- Main ---
+# --- Main loop ---
 def main():
-    logger.info("🔵 Starting lemma backfill (Corpus 2)...")
+    logger.info("🔵 Starting lemma backfill (Corpus 2, s1–s5)...")
     total = 0
     batch = 0
 
@@ -90,7 +95,7 @@ def main():
                 total += updated
                 batch += 1
                 logger.info(f"Batch {batch}: {updated} items updated (Total: {total})")
-                time.sleep(0.2)  # throttle
+                time.sleep(0.2)  # Aura throttle
     finally:
         driver.close()
 
