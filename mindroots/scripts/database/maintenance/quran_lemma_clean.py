@@ -3,6 +3,7 @@ import time
 from neo4j import GraphDatabase
 from dotenv import load_dotenv
 import os
+import logging
 
 # --- Setup ---
 load_dotenv()
@@ -11,35 +12,37 @@ user = os.getenv("NEO4J_USER")
 password = os.getenv("NEO4J_PASS")
 driver = GraphDatabase.driver(uri, auth=(user, password))
 
+# --- Logging ---
+logger = logging.getLogger("lemma_backfill")
+logger.setLevel(logging.INFO)
+
+fh = logging.FileHandler("lemma_backfill.log", encoding="utf-8")
+fh.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+logger.addHandler(fh)
+
+ch = logging.StreamHandler()
+ch.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+logger.addHandler(ch)
+
 # --- Cleaning function ---
 def clean_lemma(text: str) -> str:
     if not text:
         return None
-    # Remove ^ (long vowel marker)
-    text = text.replace("^", "")
-    # Replace # (Buckwalter oddity) → ئ
-    text = text.replace("#", "ئ")
-    return text
+    return text.replace("^", "").replace("#", "ئ")
 
 # --- Neo4j update batch ---
 def update_batch(tx, batch_size=500):
     query = """
     MATCH (ci:CorpusItem)
-    WHERE ci.corpus_id = 2
-      // Only process nodes that still have dirty characters
-      AND any(val IN [
-        ci.s1_lemma_norm, ci.s2_lemma_norm, ci.s3_lemma_norm,
-        ci.s4_lemma_norm, ci.s5_lemma_norm
-      ] WHERE val =~ '.*[\\^#].*')
-      // Skip nodes that have already been cleaned
-      AND any(cleaned IN [
-        ci.s1_lemma_cleaned, ci.s2_lemma_cleaned, ci.s3_lemma_cleaned,
-        ci.s4_lemma_cleaned, ci.s5_lemma_cleaned
-      ] WHERE cleaned IS NULL)
+    WHERE ci.corpus_id = 2 AND ci.lemma IS NULL
     RETURN ci.item_id AS item_id,
-           ci.s1_lemma_norm AS s1, ci.s2_lemma_norm AS s2,
-           ci.s3_lemma_norm AS s3, ci.s4_lemma_norm AS s4,
-           ci.s5_lemma_norm AS s5
+           ci.s1_lemma AS s1_lemma, ci.s1_lemma_norm AS s1_norm,
+           ci.s2_lemma AS s2_lemma, ci.s2_lemma_norm AS s2_norm,
+           ci.s3_lemma AS s3_lemma, ci.s3_lemma_norm AS s3_norm,
+           ci.s4_lemma AS s4_lemma, ci.s4_lemma_norm AS s4_norm,
+           ci.s5_lemma AS s5_lemma, ci.s5_lemma_norm AS s5_norm,
+           ci.s6_lemma AS s6_lemma, ci.s6_lemma_norm AS s6_norm,
+           ci.s7_lemma AS s7_lemma, ci.s7_lemma_norm AS s7_norm
     LIMIT $batch_size
     """
     result = tx.run(query, batch_size=batch_size)
@@ -47,29 +50,37 @@ def update_batch(tx, batch_size=500):
     updates = []
     for record in result:
         item_id = record["item_id"]
-        cleaned = {}
-        for i in range(1, 5+1):
-            val = record.get(f"s{i}")
-            if val and ("^" in val or "#" in val):  # only clean dirty values
-                cleaned[f"s{i}_lemma_cleaned"] = clean_lemma(val)
-        if cleaned:
-            updates.append((item_id, cleaned))
+        lemma_val = None
 
-    for item_id, cleaned in updates:
-        set_clause = ", ".join([f"ci.`{k}` = ${k}" for k in cleaned.keys()])
-        params = {"item_id": item_id, **cleaned}
-        tx.run(f"""
-            MATCH (ci:CorpusItem {{corpus_id: 2, item_id: $item_id}})
-            SET {set_clause}
-        """, **params)
+        # Loop over segments s1–s7
+        for i in range(1, 8):
+            lemma_norm = record.get(f"s{i}_norm")
+            lemma_raw = record.get(f"s{i}_lemma")
+            if lemma_norm or lemma_raw:
+                lemma_val = lemma_norm if lemma_norm else lemma_raw
+                break
+
+        if lemma_val:
+            lemma_val = clean_lemma(lemma_val)
+            updates.append((item_id, lemma_val))
+
+    # Apply updates
+    for item_id, lemma_val in updates:
+        tx.run("""
+            MATCH (ci:CorpusItem {corpus_id: 2, item_id: $item_id})
+            SET ci.lemma = $lemma_val
+        """, item_id=item_id, lemma_val=lemma_val)
+        logger.info(f"✅ Updated item {item_id} → lemma='{lemma_val}'")
 
     return len(updates)
 
+
 # --- Main ---
 def main():
-    print("🔵 Starting cleanup of sX_lemma_norm → sX_lemma_cleaned...")
+    logger.info("🔵 Starting lemma backfill (Corpus 2)...")
     total = 0
     batch = 0
+
     try:
         while True:
             with driver.session() as session:
@@ -78,11 +89,12 @@ def main():
                     break
                 total += updated
                 batch += 1
-                print(f"✅ Batch {batch}: Updated {updated} items (Total: {total})")
-                time.sleep(0.2)  # Aura throttle
+                logger.info(f"Batch {batch}: {updated} items updated (Total: {total})")
+                time.sleep(0.2)  # throttle
     finally:
         driver.close()
-    print(f"🎉 Done. Cleaned {total} CorpusItems.")
+
+    logger.info(f"🎉 Done. Backfilled lemma for {total} CorpusItems.")
 
 if __name__ == "__main__":
     main()
