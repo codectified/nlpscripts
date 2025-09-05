@@ -60,6 +60,76 @@ python linkquranwords.py
 - **CRITICAL FIX**: Added `corpus_id: 2` filter to linking queries to prevent cross-corpus contamination
 - Added failed item tracking (`link_failed` property) to prevent infinite loops on persistently failing items
 
+## Phase 2 Refactor (2025-09-05)
+
+**Overview**: Complete refactor of the normalization and segment rebuilding pipeline to improve lemma matching accuracy between Quranic corpus and Lane's lexicon.
+
+### Phase 2 Scripts (maintenance/current-pipeline/phase2-refactor/)
+
+#### 1. rebuild_segments.py
+**Purpose**: Rebuild Arabic segments from Buckwalter transliteration and create multiple Arabic representations.
+
+**Key Features:**
+- Converts Buckwalter forms (sX_form) to Arabic (sX_arabic) 
+- Handles special Buckwalter symbols: `^` (madda), `#` (hamza on ya), `@` (long alif)
+- Creates concatenated representations for matching
+
+**Properties Created:**
+- `sX_arabic`: Individual segment Arabic forms
+- `full_arabic`: Complete Arabic text with diacritics  
+- `full_arabic_no_diac`: Diacritics stripped only (preserves articles for Lane matching)
+- `sem`: Copy of full_arabic
+
+#### 2. normalize_lemmas.py  
+**Purpose**: Normalize CorpusItem lemmas with layered normalization for flexible matching.
+
+**Key Features:**
+- Converts Buckwalter lemmas to Arabic using camel-tools
+- Applies consistent Unicode normalization (NFKD + diacritic removal)
+- Creates multiple normalization layers for different matching strategies
+
+**Properties Created:**
+- `lemma`: Arabic lemma (converted from Buckwalter)
+- `lemma_norm`: Standard normalization (alifs, ya, hamza seats normalized)  
+- `lemma_no_fem`: Conservative normalization (+ feminine markers ة removed entirely)
+
+#### 3. normalize_words.py
+**Purpose**: Normalize existing Word nodes to match CorpusItem processing.
+
+**Key Features:**
+- Applies identical normalization logic to Word nodes under Lane's lexicon
+- Ensures consistent matching properties across corpus and lexicon
+
+**Properties Created:**
+- `arabic_no_diacritics`: Diacritics stripped only
+- `arabic_normalized`: Standard normalization  
+- `arabic_no_fem`: Conservative normalization (ة removed entirely)
+
+### Critical Unicode Normalization Fixes
+- **Madda Alif Handling**: Fixed `آ` decomposition via NFKD → `ا` + `ٓ` (madda above)
+- **Hamza Alif Handling**: Fixed `أإ` decomposition → `ا` + hamza marks  
+- **Extended Diacritic Range**: Pattern `[\u064B-\u0655\u0670]` includes madda (U+0653) and hamza marks (U+0654-U+0655)
+- **Hamza Seat Normalization**: `ؤئ` decompose to base letters + hamza marks (automatically stripped)
+
+### Normalization Strategy
+**Layered Approach for Maximum Matching Flexibility:**
+1. **Article-Preserving**: `full_arabic_no_diac` vs Lane entries with articles (الكتاب)
+2. **Standard**: `lemma_norm`, `arabic_normalized` vs Lane entries (normalized forms)  
+3. **Conservative**: `lemma_no_fem`, `arabic_no_fem` vs Lane entries (orthographic variants)
+
+**Test Cases Verified:**
+- `آزفة` → `ازفة` (norm) → `ازف` (no_fem) ✅
+- `أإآٱسم` → `ااااسم` (all alif variants) ✅  
+- `سؤال` → `سوال` (hamza seats) ✅
+- `الكِتَابُ` → `الكتاب` (article preservation) ✅
+
+### Execution Order
+**Sequential execution recommended:**
+1. `rebuild_segments.py` - Reconstruct Arabic segments
+2. `normalize_lemmas.py` - Normalize CorpusItem lemmas  
+3. `normalize_words.py` - Normalize Word nodes
+4. Ready for improved linking with multiple matching strategies
+
 ## Version Control Best Practices
 **Important:** Always use incremental commits and branching when working on code changes:
 - Create a new branch for each feature/fix: `git checkout -b feature/description`

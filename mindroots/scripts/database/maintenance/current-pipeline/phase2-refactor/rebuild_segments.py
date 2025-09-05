@@ -1,9 +1,10 @@
 """
 Rebuild sX_arabic from Buckwalter forms, and rebuild full_arabic / sem.
 Handles special symbols ^, #, @.
+Also creates full_arabic_no_diac (diacritics stripped, preserving articles).
 """
 
-import os, time, re, logging
+import os, time, re, unicodedata
 from dotenv import load_dotenv
 from neo4j import GraphDatabase
 from camel_tools.utils.charmap import CharMapper
@@ -28,9 +29,19 @@ def custom_bw_to_arabic(bw: str) -> str:
     bw = bw.replace("@", "A")  # long alif → ا
     return bw2ar.transliterate(bw)
 
+def strip_diacritics_only(text):
+    """Strip diacritics but preserve articles and other structure"""
+    if not text: 
+        return None
+    # Strip diacritics including madda and hamza marks  
+    diacs = re.compile(r'[\u064B-\u0655\u0670]')  # Include U+0653-U+0655 (madda, hamza above/below)
+    text = unicodedata.normalize('NFKD', text)
+    return diacs.sub('', text)
+
 def rebuild_batch(tx, batch_size=500):
     q = """
     MATCH (ci:CorpusItem {corpus_id: 2})
+    WHERE ci.full_arabic_no_diac IS NULL
     RETURN ci.item_id AS item_id,
            ci.s1_form AS s1_form,
            ci.s2_form AS s2_form,
@@ -56,6 +67,8 @@ def rebuild_batch(tx, batch_size=500):
             full = "".join(segments)
             props["full_arabic"] = full
             props["sem"] = full
+            # Add diacritics-only stripped version (preserves articles)
+            props["full_arabic_no_diac"] = strip_diacritics_only(full)
         updates.append((item_id, props))
 
     for item_id, props in updates:
@@ -68,7 +81,7 @@ def rebuild_batch(tx, batch_size=500):
     return len(updates)
 
 def main():
-    print("🔵 Rebuilding sX_arabic and full_arabic/sem...")
+    print("🔵 Rebuilding sX_arabic, full_arabic/sem, and full_arabic_no_diac...")
     total = 0
     while True:
         with driver.session() as session:

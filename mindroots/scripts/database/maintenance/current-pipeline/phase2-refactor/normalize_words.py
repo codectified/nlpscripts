@@ -36,7 +36,7 @@ def normalize_arabic(text, conservative=False):
     - Normalize hamza seats (ؤ → و, ئ → ي)
     
     Conservative mode (conservative=True):
-    - Same as above, plus ة → ه
+    - Same as above, plus remove ة entirely
     """
     if not text: 
         return None
@@ -51,7 +51,7 @@ def normalize_arabic(text, conservative=False):
     
     # Conservative mode: remove feminine markers completely
     if conservative:
-        text = text.replace('ة', 'ه')  # ta marbuta → ha
+        text = text.replace('ة', '')  # ta marbuta → remove entirely
     
     # Normalize hamza seats - these are handled by NFKD + diacritic removal
     # No additional processing needed as hamza marks are stripped
@@ -59,7 +59,7 @@ def normalize_arabic(text, conservative=False):
     return text
 
 def update_words(tx, batch_size=500):
-    q = "MATCH (w:Word) RETURN elementId(w) AS wid, w.arabic AS arabic LIMIT $batch_size"
+    q = "MATCH (w:Word) WHERE w.arabic_no_fem IS NULL RETURN elementId(w) AS wid, w.arabic AS arabic LIMIT $batch_size"
     rows = list(tx.run(q, batch_size=batch_size))
     updates = []
     for row in rows:

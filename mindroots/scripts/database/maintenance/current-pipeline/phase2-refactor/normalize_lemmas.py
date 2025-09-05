@@ -51,7 +51,7 @@ def normalize_arabic(text, conservative=False):
     - Normalize hamza seats (ؤ → و, ئ → ي)
     
     Conservative mode (conservative=True):
-    - Same as above, plus ة → ه
+    - Same as above, plus remove ة entirely
     """
     if not text: 
         return None
@@ -66,7 +66,7 @@ def normalize_arabic(text, conservative=False):
     
     # Conservative mode: remove feminine markers completely
     if conservative:
-        text = text.replace('ة', 'ه')  # ta marbuta → ha
+        text = text.replace('ة', '')  # ta marbuta → remove entirely
     
     # Normalize hamza seats - these are handled by NFKD + diacritic removal
     # No additional processing needed as hamza marks are stripped
@@ -77,10 +77,10 @@ def update_lemmas(tx, batch_size=500):
     """Update CorpusItem lemmas in batches"""
     q = """
     MATCH (ci:CorpusItem {corpus_id: 2})
-    WHERE ci.s1_lemma IS NOT NULL OR ci.s2_lemma IS NOT NULL OR 
-          ci.s3_lemma IS NOT NULL OR ci.s4_lemma IS NOT NULL OR ci.s5_lemma IS NOT NULL
+    WHERE (ci.s1_lemma IS NOT NULL OR ci.s2_lemma IS NOT NULL OR 
+           ci.s3_lemma IS NOT NULL OR ci.s4_lemma IS NOT NULL OR ci.s5_lemma IS NOT NULL)
+      AND ci.lemma_no_fem IS NULL
     RETURN elementId(ci) AS cid,
-           ci.item_id AS item_id,
            ci.s1_lemma AS s1_lemma,
            ci.s2_lemma AS s2_lemma,
            ci.s3_lemma AS s3_lemma,
@@ -93,7 +93,6 @@ def update_lemmas(tx, batch_size=500):
     
     for row in rows:
         cid = row["cid"]
-        item_id = row["item_id"]
         
         # Process each segment lemma
         lemmas = []
