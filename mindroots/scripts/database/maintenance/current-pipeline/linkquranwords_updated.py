@@ -75,14 +75,16 @@ def link_items(tx):
     failed = 0
     
     try:
-        # Pull a batch of CorpusItems that have a root, lemma, no existing link, and haven't failed linking
-        # **UPDATED**: Now uses the cleaned lemma property from our pipeline
+        # Pull a batch of CorpusItems with all normalization layers
         result = tx.run("""
             MATCH (ci:CorpusItem)
             WHERE ci.corpus_id = 2 AND ci.root IS NOT NULL AND ci.lemma IS NOT NULL
               AND NOT (ci)-[:HAS_WORD]->(:Word)
               AND ci.link_failed IS NULL
-            RETURN ci.item_id AS item_id, ci.root AS root, ci.lemma AS lemma
+            RETURN ci.item_id AS item_id, ci.root AS root, ci.lemma AS lemma,
+                   ci.full_arabic_no_diac AS full_arabic_no_diac,
+                   ci.lemma_norm AS lemma_norm,
+                   ci.lemma_no_fem AS lemma_no_fem
             LIMIT 50
         """)
         
@@ -97,10 +99,11 @@ def link_items(tx):
             item_id = record['item_id']
             corpus_root = record['root']  # This is plain format (e.g., 'بني')
             lemma = record['lemma']
-            lemma_no_diacritics = strip_diacritics(lemma)
-            lemma_normalized = normalize_arabic(lemma)
+            full_arabic_no_diac = record['full_arabic_no_diac']
+            lemma_norm = record['lemma_norm']
+            lemma_no_fem = record['lemma_no_fem']
 
-            logger.info(f"Processing item {item_id}: lemma='{lemma}' -> no_diacritics='{lemma_no_diacritics}', normalized='{lemma_normalized}', root='{corpus_root}'")
+            logger.info(f"Processing item {item_id}: lemma='{lemma}', full_arabic_no_diac='{full_arabic_no_diac}', lemma_norm='{lemma_norm}', lemma_no_fem='{lemma_no_fem}', root='{corpus_root}'")
 
             # **UPDATED**: Validate root exists using the new plain_root property
             logger.debug(f"🔍 Searching for root with plain_root: '{corpus_root}'")
@@ -122,15 +125,49 @@ def link_items(tx):
             else:
                 logger.debug(f"✅ Found root with plain_root: '{corpus_root}'")
 
-            # **UPDATED**: Try to find existing word node under root using plain_root matching
-            logger.debug(f"🔍 Searching for word no_diacritics='{lemma_no_diacritics}' or normalized='{lemma_normalized}' under root with plain_root '{corpus_root}'")
-            word_match = tx.run("""
-                MATCH (r:Root)-[:HAS_WORD]->(w:Word)
-                WHERE r.plain_root = $corpus_root
-                  AND (w.arabic_no_diacritics = $lemma_no_diacritics
-                       OR w.arabic_normalized = $lemma_normalized)
-                RETURN w LIMIT 1
-            """, corpus_root=corpus_root, lemma_no_diacritics=lemma_no_diacritics, lemma_normalized=lemma_normalized).single()
+            # **NEW**: 3-layer matching strategy
+            word_match = None
+            match_type = None
+            
+            # Layer 1: Direct surface form match (strictest)
+            if full_arabic_no_diac:
+                logger.debug(f"🔍 Layer 1: Searching for full_arabic_no_diac='{full_arabic_no_diac}' -> w.arabic_no_diacritics")
+                word_match = tx.run("""
+                    MATCH (r:Root)-[:HAS_WORD]->(w:Word)
+                    WHERE r.plain_root = $corpus_root
+                      AND w.arabic_no_diacritics = $full_arabic_no_diac
+                    RETURN w LIMIT 1
+                """, corpus_root=corpus_root, full_arabic_no_diac=full_arabic_no_diac).single()
+                if word_match:
+                    match_type = "surface_form"
+            
+            # Layer 2: Cross-layer normalized matching
+            if not word_match and lemma_norm:
+                logger.debug(f"🔍 Layer 2: Searching for lemma_norm='{lemma_norm}' against all word layers")
+                word_match = tx.run("""
+                    MATCH (r:Root)-[:HAS_WORD]->(w:Word)
+                    WHERE r.plain_root = $corpus_root
+                      AND (w.arabic_no_diacritics = $lemma_norm
+                           OR w.arabic_normalized = $lemma_norm
+                           OR w.arabic_no_fem = $lemma_norm)
+                    RETURN w LIMIT 1
+                """, corpus_root=corpus_root, lemma_norm=lemma_norm).single()
+                if word_match:
+                    match_type = "normalized"
+            
+            # Layer 3: Most relaxed (feminine stripped)
+            if not word_match and lemma_no_fem:
+                logger.debug(f"🔍 Layer 3: Searching for lemma_no_fem='{lemma_no_fem}' against all word layers")
+                word_match = tx.run("""
+                    MATCH (r:Root)-[:HAS_WORD]->(w:Word)
+                    WHERE r.plain_root = $corpus_root
+                      AND (w.arabic_no_diacritics = $lemma_no_fem
+                           OR w.arabic_normalized = $lemma_no_fem
+                           OR w.arabic_no_fem = $lemma_no_fem)
+                    RETURN w LIMIT 1
+                """, corpus_root=corpus_root, lemma_no_fem=lemma_no_fem).single()
+                if word_match:
+                    match_type = "no_feminine"
 
             if word_match:
                 tx.run("""
@@ -139,24 +176,25 @@ def link_items(tx):
                     WHERE elementId(w) = $wid
                     MERGE (ci)-[:HAS_WORD]->(w)
                 """, item_id=item_id, wid=word_match['w'].element_id)
-                logger.info(f"✅ Linked item {item_id} to existing Word (id: {word_match['w'].element_id})")
+                logger.info(f"✅ Linked item {item_id} to existing Word (id: {word_match['w'].element_id}) via {match_type} match")
                 matched += 1
             else:
-                # **UPDATED**: Create new Word node under root using plain_root matching
+                # **UPDATED**: Create new Word node under root with all normalization layers
                 word_create = tx.run("""
                     MATCH (r:Root)
                     WHERE r.plain_root = $corpus_root
                     CREATE (w:Word {
                         arabic: $lemma,
-                        arabic_no_diacritics: $lemma_no_diacritics,
-                        arabic_normalized: $lemma_normalized,
+                        arabic_no_diacritics: $lemma_norm,
+                        arabic_normalized: $lemma_norm,
+                        arabic_no_fem: $lemma_no_fem,
                         generated: true,
                         node_type: "Word",
                         type: "word"
                     })
                     CREATE (r)-[:HAS_WORD]->(w)
                     RETURN w
-                """, corpus_root=corpus_root, lemma=lemma, lemma_no_diacritics=lemma_no_diacritics, lemma_normalized=lemma_normalized).single()
+                """, corpus_root=corpus_root, lemma=lemma, lemma_norm=lemma_norm, lemma_no_fem=lemma_no_fem).single()
 
                 if word_create:
                     tx.run("""
