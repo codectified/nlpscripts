@@ -47,7 +47,7 @@ def normalize_arabic(text, conservative=False):
     text = strip_diacritics(text)
     
     # Normalize alifs - madda and hamza alifs are decomposed by NFKD and diacritics removed
-    text = text.replace('ٱ', 'ا')  # alif wasla (not decomposed by NFKD)
+    # Note: waṣla alif (ٱ) already handled in strip_diacritics()
     
     # Normalize ya
     text = text.replace('ى', 'ي')  # ya alif maqsura

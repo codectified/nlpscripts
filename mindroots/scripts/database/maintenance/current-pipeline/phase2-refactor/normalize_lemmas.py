@@ -25,8 +25,9 @@ def buckwalter_to_arabic(bw: str) -> str:
     if not bw:
         return None
     # Handle special cases that camel-tools doesn't handle correctly
-    # Handle A^ → آ sequence (camel-tools expects | for madda alif, not A^)
-    bw = re.sub(r"A\^", "آ", bw)  # collapse A^ sequence into madda alif
+    # Handle alif madda (آ) cases before transliteration
+    bw = re.sub(r"A\^", "آ", bw)  # collapse A^ → آ
+    bw = bw.replace("^", "آ")     # catch any remaining stray ^ → آ
     bw = bw.replace("#", "}")     # force hamza on ya seat → ئ
     bw = bw.replace("@", "")      # ignore @ symbol (remove entirely)
     bw = bw.replace("{", "A")     # waṣla alif → plain alif (for camel-tools)
