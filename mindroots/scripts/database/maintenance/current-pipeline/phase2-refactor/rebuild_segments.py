@@ -1,7 +1,9 @@
 """
 Rebuild sX_arabic from Buckwalter forms, and rebuild full_arabic / sem.
 Handles special symbols #, @ (lets camel-tools handle ^ naturally in A^ sequences).
-Also creates full_arabic_no_diac (diacritics stripped, preserving articles).
+Creates multiple normalization layers:
+- full_arabic_no_diac (diacritics stripped, preserving articles)
+- full_arabic_no_fem (diacritics stripped + feminine markers removed)
 """
 
 import os, time, re, unicodedata
@@ -24,10 +26,11 @@ def custom_bw_to_arabic(bw: str) -> str:
     if not bw:
         return None
     # Handle special cases that camel-tools doesn't handle correctly
-    # NOTE: Do NOT handle ^ here - let camel-tools handle A^ → آ sequences naturally
-    bw = bw.replace("#", "}")  # force hamza on ya seat → ئ  
-    bw = bw.replace("@", "")   # ignore @ symbol (remove entirely)
-    bw = bw.replace("{", "A")  # waṣla alif → plain alif (for camel-tools)
+    # Handle A^ → آ sequence (camel-tools expects | for madda alif, not A^)
+    bw = re.sub(r"A\^", "آ", bw)  # collapse A^ sequence into madda alif
+    bw = bw.replace("#", "}")     # force hamza on ya seat → ئ  
+    bw = bw.replace("@", "")      # ignore @ symbol (remove entirely)
+    bw = bw.replace("{", "A")     # waṣla alif → plain alif (for camel-tools)
     
     result = bw2ar.transliterate(bw)
     
@@ -80,6 +83,8 @@ def rebuild_batch(tx, batch_size=500):
             props["sem"] = full
             # Add diacritics-only stripped version (preserves articles)
             props["full_arabic_no_diac"] = strip_diacritics_only(full)
+            # Add feminine marker removal layer (conservative normalization)
+            props["full_arabic_no_fem"] = strip_diacritics_only(full).replace('ة', '') if full else None
         updates.append((item_id, props))
 
     for item_id, props in updates:
@@ -92,7 +97,7 @@ def rebuild_batch(tx, batch_size=500):
     return len(updates)
 
 def main():
-    print("🔵 Rebuilding sX_arabic, full_arabic/sem, and full_arabic_no_diac...")
+    print("🔵 Rebuilding sX_arabic, full_arabic/sem, full_arabic_no_diac, and full_arabic_no_fem...")
     total = 0
     while True:
         with driver.session() as session:
