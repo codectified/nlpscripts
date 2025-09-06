@@ -1,6 +1,6 @@
 """
 Rebuild sX_arabic from Buckwalter forms, and rebuild full_arabic / sem.
-Handles special symbols ^, #, @.
+Handles special symbols #, @ (lets camel-tools handle ^ naturally in A^ sequences).
 Also creates full_arabic_no_diac (diacritics stripped, preserving articles).
 """
 
@@ -23,11 +23,19 @@ bw2ar = Transliterator(CharMapper.builtin_mapper("bw2ar"))
 def custom_bw_to_arabic(bw: str) -> str:
     if not bw:
         return None
-    # Handle special cases
-    bw = bw.replace("^", "A")  # madda alif → آ
-    bw = bw.replace("#", "}")  # force hamza on ya seat → ئ
-    bw = bw.replace("@", "A")  # long alif → ا
-    return bw2ar.transliterate(bw)
+    # Handle special cases that camel-tools doesn't handle correctly
+    # NOTE: Do NOT handle ^ here - let camel-tools handle A^ → آ sequences naturally
+    bw = bw.replace("#", "}")  # force hamza on ya seat → ئ  
+    bw = bw.replace("@", "")   # ignore @ symbol (remove entirely)
+    bw = bw.replace("{", "A")  # waṣla alif → plain alif (for camel-tools)
+    
+    result = bw2ar.transliterate(bw)
+    
+    # Debug: log any unresolved ^ characters (indicates malformed Buckwalter)
+    if "^" in result:
+        print(f"WARNING: Unresolved ^ in Buckwalter '{bw}' → result: '{result}'")
+    
+    return result
 
 def strip_diacritics_only(text):
     """Strip diacritics but preserve articles and other structure"""
@@ -36,7 +44,10 @@ def strip_diacritics_only(text):
     # Strip diacritics including madda and hamza marks  
     diacs = re.compile(r'[\u064B-\u0655\u0670]')  # Include U+0653-U+0655 (madda, hamza above/below)
     text = unicodedata.normalize('NFKD', text)
-    return diacs.sub('', text)
+    text = diacs.sub('', text)
+    # Normalize waṣla alif to regular alif
+    text = text.replace('ٱ', 'ا')  # U+0671 → U+0627
+    return text
 
 def rebuild_batch(tx, batch_size=500):
     q = """

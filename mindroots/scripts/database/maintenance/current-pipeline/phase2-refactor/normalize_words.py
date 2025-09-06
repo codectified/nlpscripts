@@ -16,13 +16,16 @@ driver = GraphDatabase.driver(
 )
 
 def strip_diacritics(text):
-    """Strip all diacritics including madda"""
+    """Strip all diacritics including madda and hamza marks"""
     if not text: 
         return None
     # Strip diacritics including madda and hamza marks  
     diacs = re.compile(r'[\u064B-\u0655\u0670]')  # Include U+0653-U+0655 (madda, hamza above/below)
     text = unicodedata.normalize('NFKD', text)
-    return diacs.sub('', text)
+    text = diacs.sub('', text)
+    # Normalize waṣla alif to regular alif
+    text = text.replace('ٱ', 'ا')  # U+0671 → U+0627
+    return text
 
 def normalize_arabic(text, conservative=False):
     """
