@@ -1,3 +1,38 @@
+"""
+Hans Wehr Dictionary Integration Script
+=====================================
+
+Integrates Hans Wehr dictionary entries with existing Word nodes in the Neo4j database.
+Uses the unified normalization pipeline to ensure consistent matching between Hans Wehr
+entries and Lane's Lexicon Word nodes.
+
+FEATURES:
+- Unified normalization for accurate Arabic text matching
+- Dual matching strategy: diacritics-stripped AND fully normalized
+- Prevents overwriting existing hanswehr_entry properties
+- Comprehensive logging of unmatched and corrupted entries
+- Error handling for connection issues and malformed CSV data
+
+NORMALIZATION STRATEGY:
+For each Hans Wehr entry, creates both:
+1. Diacritics-stripped version (matches w.arabic_no_diacritics)
+2. Fully normalized version (matches w.arabic_normalized)
+
+This dual approach maximizes matching success while maintaining text consistency.
+
+USAGE:
+    python addHansWehr.py
+
+REQUIREMENTS:
+- hanswehr_words_cleaned.csv (input file)
+- Neo4j connection configured via .env file
+- unified_normalization module in current-pipeline/
+
+OUTPUT:
+- unmatched_hanswehr_words.csv (entries that couldn't be matched)
+- Console logging of processing progress and results
+"""
+
 import re
 import unicodedata
 import csv
@@ -8,7 +43,7 @@ import time
 from dotenv import load_dotenv
 import os
 
-# Import unified normalization module
+# Import unified normalization module for consistent Arabic text processing
 sys.path.append('/Users/omaribrahim/dev/scripts/mindroots/scripts/database/maintenance/current-pipeline')
 from unified_normalization import normalize_arabic, strip_diacritics
 
@@ -27,16 +62,39 @@ if not all([uri, user, password]):
 # Connect to Neo4j
 driver = GraphDatabase.driver(uri, auth=(user, password))
 
-# Function to match a word node using unified normalization and add Hans Wehr entry
 def add_hanswehr_entry(tx, hanswehr_word, hanswehr_definition):
-    # Apply unified normalization to Hans Wehr word
-    normalized_word = normalize_arabic(hanswehr_word)
-    no_diac_word = strip_diacritics(hanswehr_word)
+    """
+    Match a Hans Wehr dictionary entry to existing Word nodes using unified normalization.
+
+    MATCHING STRATEGY:
+    Uses dual normalization approach to maximize matching success:
+    1. Diacritics-stripped matching (w.arabic_no_diacritics)
+    2. Fully normalized matching (w.arabic_normalized)
+
+    CRITICAL FIX:
+    Only updates Word nodes where hanswehr_entry IS NULL to prevent overwriting
+    existing definitions (was incorrectly checking IS NOT NULL before).
+
+    Args:
+        tx: Neo4j transaction object
+        hanswehr_word (str): Arabic word from Hans Wehr dictionary
+        hanswehr_definition (str): Definition to add to matching Word node
+
+    Returns:
+        Neo4j record with matched word info, or None if no match found
+    """
+    # Apply unified normalization to Hans Wehr word for consistent matching
+    normalized_word = normalize_arabic(hanswehr_word)  # Full normalization (alifs, ya, etc.)
+    no_diac_word = strip_diacritics(hanswehr_word)     # Diacritics only
+
+    # Debug logging for normalization results
+    if hanswehr_word != normalized_word:
+        print(f"  Normalization: '{hanswehr_word}' → '{normalized_word}'")
 
     query = """
     MATCH (w:Word)
     WHERE (w.arabic_no_diacritics = $no_diac_word OR w.arabic_normalized = $normalized_word)
-      AND w.hanswehr_entry IS NULL  // Fixed: only set definitions once
+      AND w.hanswehr_entry IS NULL  // CRITICAL: Only set definitions once
     SET w.hanswehr_entry = $hanswehr_definition
     RETURN w.arabic AS word, w.hanswehr_entry AS definition
     """
@@ -46,8 +104,21 @@ def add_hanswehr_entry(tx, hanswehr_word, hanswehr_definition):
                    hanswehr_definition=hanswehr_definition)
     return result.single()
 
-# Function to process and add Hans Wehr entries, logging unmatched or corrupt words
 def process_hanswehr_entries(hanswehr_file, unmatched_log_file):
+    """
+    Process Hans Wehr dictionary CSV file and integrate entries with Word nodes.
+
+    PROCESSING WORKFLOW:
+    1. Read CSV entries (word, definition)
+    2. Filter out corrupted/oversized entries (>3 words)
+    3. Apply unified normalization to each word
+    4. Attempt matching against Word nodes
+    5. Log unmatched entries for manual review
+
+    Args:
+        hanswehr_file (str): Path to Hans Wehr CSV file
+        unmatched_log_file (str): Path for logging unmatched entries
+    """
     row_counter = 0  # Add a counter to track the progress
     
     with open(hanswehr_file, newline='') as csvfile, \
@@ -67,20 +138,20 @@ def process_hanswehr_entries(hanswehr_file, unmatched_log_file):
                 hanswehr_definition = row['definition']
 
                 try:
-                    # Check if the word entry is more than 2 or 3 words (likely a corrupted entry)
-                    if len(hanswehr_word.split()) > 3:  # Assuming max 3 words is reasonable
-                        print(f"Corrupt or oversized word entry found at row {row_counter}: {hanswehr_word}")
+                    # Filter out corrupted entries: likely corrupted if >3 words
+                    if len(hanswehr_word.split()) > 3:
+                        print(f"SKIPPED - Oversized entry at row {row_counter}: {hanswehr_word}")
                         unmatched_writer.writerow({'word': hanswehr_word, 'definition': hanswehr_definition})
                         continue
 
-                    # Match and update the word in the Neo4j database using unified normalization
-                    result = session.write_transaction(add_hanswehr_entry, hanswehr_word, hanswehr_definition)
+                    # Attempt to match and update using unified normalization
+                    result = session.execute_write(add_hanswehr_entry, hanswehr_word, hanswehr_definition)
 
                     if result:
-                        print(f"Updated word {result['word']} with Hans Wehr definition.")
+                        print(f"✅ MATCHED: '{hanswehr_word}' → Word '{result['word']}'")
                     else:
-                        print(f"No match found for Hans Wehr word: {hanswehr_word}")
-                        # Log unmatched word to the CSV file
+                        print(f"❌ UNMATCHED: '{hanswehr_word}' (no matching Word node found)")
+                        # Log unmatched entry for manual review
                         unmatched_writer.writerow({'word': hanswehr_word, 'definition': hanswehr_definition})
 
                 except (ServiceUnavailable, SessionExpired) as e:
@@ -90,8 +161,19 @@ def process_hanswehr_entries(hanswehr_file, unmatched_log_file):
                     print(f"CSV error at row {row_counter}: {csv_err}, skipping this row.")
                     unmatched_writer.writerow({'word': hanswehr_word, 'definition': 'corrupted data'})
 
-# Run the process and log unmatched words
-process_hanswehr_entries('hanswehr_words_cleaned.csv', 'unmatched_hanswehr_words.csv')
+if __name__ == "__main__":
+    print("🔄 Starting Hans Wehr dictionary integration...")
+    print("📚 Using unified normalization for Arabic text matching")
+    print("🎯 Matching strategy: diacritics-stripped + fully normalized")
+    print("\n" + "="*60 + "\n")
 
-# Close the driver connection when done
-driver.close()
+    # Process Hans Wehr entries with unified normalization
+    process_hanswehr_entries('hanswehr_words_cleaned.csv', 'unmatched_hanswehr_words.csv')
+
+    print("\n" + "="*60)
+    print("✅ Hans Wehr integration complete!")
+    print("📄 Check unmatched_hanswehr_words.csv for entries that couldn't be matched")
+
+    # Ensure clean database connection shutdown
+    driver.close()
+    print("🔌 Database connection closed.")

@@ -126,9 +126,73 @@ python linkquranwords.py
 ### Execution Order
 **Sequential execution recommended:**
 1. `rebuild_segments.py` - Reconstruct Arabic segments
-2. `normalize_lemmas.py` - Normalize CorpusItem lemmas  
+2. `normalize_lemmas.py` - Normalize CorpusItem lemmas
 3. `normalize_words.py` - Normalize Word nodes
 4. Ready for improved linking with multiple matching strategies
+
+## Unified Normalization Pipeline (2025-09-13)
+
+**MAJOR REFACTOR**: Implemented unified normalization system to ensure consistency across all pipeline components.
+
+### Unified Normalization Module (`current-pipeline/unified_normalization.py`)
+
+**Purpose**: Single source of truth for Arabic text normalization across entire MindRoots pipeline.
+
+**Core Normalization Rules:**
+1. **Unicode Normalization (NFKD)** - Decomposes composite characters (آ → ا + madda mark)
+2. **Diacritic Stripping** - Removes U+064B-U+0655, U+0670 (tashkeel, madda, hamza marks)
+3. **Alif Normalization** - أإآٱ → ا (automatic via NFKD + stripping)
+4. **Ya Normalization** - ى → ي
+5. **Hamza Seat Normalization** - ؤئ → وي (automatic via NFKD + stripping)
+6. **Feminine Marker Handling** - ة preserved in standard, stripped in conservative fallback
+
+**Buckwalter Preprocessing:**
+- `A^` → `آ` (alif madda sequences)
+- `^` → `آ` (stray madda symbols)
+- `#` → `ئ` (hamza on ya seat)
+- `@` → removed entirely
+- `{` → `A` (wasla alif for camel-tools compatibility)
+
+**Normalization Layers:**
+1. **no_diacritics**: Strip diacritics only, preserve structure
+2. **normalized**: Full standard normalization
+3. **conservative**: Standard + feminine marker removal (fallback)
+
+### Updated Scripts Using Unified Normalization
+
+#### 1. Hans Wehr Integration (`addHansWehr.py`) ✅ UPDATED
+- **CRITICAL FIX**: `WHERE w.hanswehr_entry IS NULL` (was incorrectly `IS NOT NULL`)
+- **Dual Matching Strategy**: Matches both `w.arabic_no_diacritics` AND `w.arabic_normalized`
+- **Unified Processing**: Uses `normalize_arabic()` and `strip_diacritics()` from unified module
+- **Enhanced Logging**: Shows normalization transformations and match results
+
+#### 2. Word Node Normalization (`phase2-refactor/normalize_words.py`) ✅ UPDATED
+- **Simplified Properties**: Removed noisy `w.arabic_no_fem`, focuses on `w.arabic_no_diacritics` + `w.arabic_normalized`
+- **Unified Functions**: Replaced custom normalization with `create_normalization_layers()`
+- **Consistent Processing**: Ensures Word nodes match CorpusItem normalization exactly
+
+#### 3. Corpus Lemma Normalization (`phase2-refactor/normalize_lemmas.py`) ✅ UPDATED
+- **Simplified Properties**: Removed `lemma_no_fem`, focuses on `lemma` + `lemma_norm`
+- **Unified Buckwalter**: Uses `buckwalter_to_arabic()` from unified module
+- **Consistent Logic**: Identical normalization pipeline as Word nodes
+
+#### 4. Corpus Segment Rebuild (`phase2-refactor/rebuild_segments.py`) ✅ UPDATED
+- **Simplified Properties**: Removed `full_arabic_no_fem`
+- **Unified Processing**: Uses unified `buckwalter_to_arabic()` and `strip_diacritics()`
+- **Streamlined Pipeline**: Focuses on `full_arabic` + `full_arabic_no_diac` + `sem`
+
+### Expected Results from Unified Normalization
+- **Improved Corpus ↔ Word Linking**: Consistent normalization reduces placeholder Word creation
+- **Better Hans Wehr Matching**: More dictionary entries match existing Word nodes
+- **Database Consistency**: All normalization layers aligned across pipeline components
+- **Reduced Maintenance**: Single normalization codebase eliminates inconsistencies
+
+### Critical Implementation Notes
+1. **NFKD First**: Always apply `unicodedata.normalize('NFKD')` before diacritic stripping
+2. **Decomposition Dependency**: Alif and hamza seat normalization rely on NFKD decomposition
+3. **Order Matters**: Strip diacritics BEFORE other transformations
+4. **Wasla Exception**: ٱ (U+0671) requires explicit replacement (not decomposed by NFKD)
+5. **Camel-Tools Compatibility**: Preprocess special Buckwalter symbols before transliteration
 
 ## Version Control Best Practices
 **Important:** Always use incremental commits and branching when working on code changes:

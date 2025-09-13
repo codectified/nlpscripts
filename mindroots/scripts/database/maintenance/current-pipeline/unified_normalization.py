@@ -1,19 +1,111 @@
 """
-Unified normalization module for consistent text processing across all pipeline scripts.
+Unified Arabic Text Normalization Module
+=======================================
 
-This module provides a single source of truth for Arabic text normalization,
-ensuring consistency between:
-- Hans Wehr ingestion
-- Word node normalization
-- CorpusItem lemma normalization
-- CorpusItem segment rebuilding
+This module provides a single source of truth for Arabic text normalization across
+the entire MindRoots pipeline, ensuring consistent text processing between:
 
-Core normalization rules:
-1. Diacritic stripping (U+064B–U+0655, U+0670) with NFKD normalization
-2. Alif normalization (أ, إ, آ, ٱ → ا)
-3. Ya normalization (ى → ي)
-4. Feminine marker handling (keep in main, strip in conservative fallback)
-5. Hamza seat normalization (handled by NFKD + diacritic stripping)
+1. **Hans Wehr Dictionary Ingestion** (addHansWehr.py)
+   - Normalizes Hans Wehr dictionary entries before matching to Word nodes
+
+2. **Word Node Normalization** (phase2-refactor/normalize_words.py)
+   - Creates normalized properties on Lane's Lexicon Word nodes
+
+3. **Corpus Item Lemma Normalization** (phase2-refactor/normalize_lemmas.py)
+   - Normalizes Quranic corpus lemmas from Buckwalter transliteration
+
+4. **Corpus Segment Rebuilding** (phase2-refactor/rebuild_segments.py)
+   - Converts Buckwalter segments to Arabic and applies normalization layers
+
+CORE NORMALIZATION RULES
+========================
+
+The normalization pipeline follows these rules in order:
+
+1. **Unicode Normalization (NFKD)**
+   - Decomposes composite characters (آ → ا + madda mark)
+   - Essential for proper diacritic handling
+
+2. **Diacritic Stripping**
+   - Removes tashkeel: U+064B-U+064A (fatha, damma, kasra, etc.)
+   - Removes extended marks: U+0670 (superscript alif)
+   - Removes madda and hamza marks: U+0653-U+0655
+
+3. **Alif Normalization** (automatic via NFKD + diacritic stripping)
+   - أ (hamza above) → ا + hamza mark → ا (mark stripped)
+   - إ (hamza below) → ا + hamza mark → ا (mark stripped)
+   - آ (madda) → ا + madda mark → ا (mark stripped)
+   - ٱ (wasla) → ا (explicit replacement, not decomposed by NFKD)
+
+4. **Ya Normalization**
+   - ى (alif maqsura) → ي (ya)
+
+5. **Hamza Seat Normalization** (automatic via NFKD + diacritic stripping)
+   - ؤ (waw hamza) → و + hamza mark → و (mark stripped)
+   - ئ (ya hamza) → ي + hamza mark → ي (mark stripped)
+
+6. **Feminine Marker Handling**
+   - ة (ta marbuta) preserved in standard normalization
+   - Conservative layer available for fallback matching (strips ة entirely)
+
+BUCKWALTER CONVERSION
+====================
+
+Special preprocessing for Buckwalter transliteration symbols:
+- A^ → آ (alif madda sequences)
+- ^ → آ (stray madda symbols)
+- # → ئ (hamza on ya seat)
+- @ → removed entirely
+- { → A (wasla alif → plain alif for camel-tools compatibility)
+
+NORMALIZATION LAYERS
+===================
+
+The module provides multiple normalization layers for flexible matching:
+
+1. **no_diacritics**: Strip diacritics only, preserve structure
+   - Use for: Article-preserving matching (الكتاب remains الكتاب)
+
+2. **normalized**: Full standard normalization
+   - Use for: Standard corpus ↔ lexicon matching
+
+3. **conservative**: Standard + feminine marker removal
+   - Use for: Fallback matching when standard fails
+   - Example: آزفة → ازف (handles orthographic variants)
+
+USAGE EXAMPLES
+=============
+
+```python
+from unified_normalization import normalize_arabic, create_normalization_layers
+
+# Standard normalization
+text = "الْكِتَابُ"
+normalized = normalize_arabic(text)  # → "الكتاب"
+
+# Multiple layers for flexible matching
+layers = create_normalization_layers("آزفة")
+# layers['no_diacritics'] → "آزفة"
+# layers['normalized'] → "ازفة"
+# layers['conservative'] → "ازف"
+
+# Buckwalter conversion
+from unified_normalization import buckwalter_to_arabic
+arabic = buckwalter_to_arabic("A^zfp")  # → "آزفة"
+```
+
+CRITICAL IMPLEMENTATION NOTES
+=============================
+
+1. **NFKD First**: Always apply unicodedata.normalize('NFKD') before diacritic stripping
+2. **Decomposition Dependency**: Alif and hamza seat normalization rely on NFKD decomposition
+3. **Order Matters**: Strip diacritics BEFORE other transformations
+4. **Wasla Exception**: ٱ (U+0671) must be explicitly replaced (not decomposed by NFKD)
+5. **Camel-Tools Compatibility**: Preprocess special Buckwalter symbols before transliteration
+
+This unified approach ensures all pipeline components use identical normalization logic,
+eliminating inconsistencies that previously caused linking failures between corpus data
+and lexical resources.
 """
 
 import re
