@@ -5,9 +5,13 @@ Normalize Word nodes with layered normalization:
 - arabic_no_fem (conservative normalization with feminine markers removed)
 """
 
-import os, re, unicodedata, time
+import os, re, unicodedata, time, sys
 from dotenv import load_dotenv
 from neo4j import GraphDatabase
+
+# Import unified normalization module
+sys.path.append('/Users/omaribrahim/dev/scripts/mindroots/scripts/database/maintenance/current-pipeline')
+from unified_normalization import normalize_arabic, strip_diacritics, create_normalization_layers
 
 load_dotenv()
 driver = GraphDatabase.driver(
@@ -15,71 +19,32 @@ driver = GraphDatabase.driver(
     auth=(os.getenv("NEO4J_USER"), os.getenv("NEO4J_PASS"))
 )
 
-def strip_diacritics(text):
-    """Strip all diacritics including madda and hamza marks"""
-    if not text: 
-        return None
-    # Strip diacritics including madda and hamza marks  
-    diacs = re.compile(r'[\u064B-\u0655\u0670]')  # Include U+0653-U+0655 (madda, hamza above/below)
-    text = unicodedata.normalize('NFKD', text)
-    text = diacs.sub('', text)
-    # Normalize waṣla alif to regular alif
-    text = text.replace('ٱ', 'ا')  # U+0671 → U+0627
-    return text
-
-def normalize_arabic(text, conservative=False):
-    """
-    Normalize Arabic text with optional conservative mode
-    
-    Standard normalization:
-    - Strip diacritics (including madda)
-    - Normalize alifs (أ, إ, آ, ٱ → ا)
-    - Normalize ya (ى → ي)
-    - Keep ta marbuta (ة stays as is)
-    - Normalize hamza seats (ؤ → و, ئ → ي)
-    
-    Conservative mode (conservative=True):
-    - Same as above, plus remove ة entirely
-    """
-    if not text: 
-        return None
-    
-    text = strip_diacritics(text)
-    
-    # Normalize alifs - madda and hamza alifs are decomposed by NFKD and diacritics removed
-    # Note: waṣla alif (ٱ) already handled in strip_diacritics()
-    
-    # Normalize ya
-    text = text.replace('ى', 'ي')  # ya alif maqsura
-    
-    # Conservative mode: remove feminine markers completely
-    if conservative:
-        text = text.replace('ة', '')  # ta marbuta → remove entirely
-    
-    # Normalize hamza seats - these are handled by NFKD + diacritic removal
-    # No additional processing needed as hamza marks are stripped
-    
-    return text
+# Normalization functions are now imported from unified_normalization module
 
 def update_words(tx, batch_size=500):
-    q = "MATCH (w:Word) WHERE w.arabic_no_fem IS NULL RETURN elementId(w) AS wid, w.arabic AS arabic LIMIT $batch_size"
+    # Remove arabic_no_fem as per instructions (too noisy)
+    q = "MATCH (w:Word) WHERE w.arabic_normalized IS NULL RETURN elementId(w) AS wid, w.arabic AS arabic LIMIT $batch_size"
     rows = list(tx.run(q, batch_size=batch_size))
     updates = []
     for row in rows:
         wid = row["wid"]
         ar = row["arabic"]
-        if not ar: continue
-        no_diac = strip_diacritics(ar)
-        norm = normalize_arabic(ar, conservative=False)
-        no_fem = normalize_arabic(ar, conservative=True)
-        updates.append((wid, no_diac, norm, no_fem))
-    for wid, no_diac, norm, no_fem in updates:
+        if not ar:
+            continue
+
+        # Use unified normalization
+        layers = create_normalization_layers(ar)
+        no_diac = layers['no_diacritics']
+        normalized = layers['normalized']
+
+        updates.append((wid, no_diac, normalized))
+
+    for wid, no_diac, normalized in updates:
         tx.run("""
             MATCH (w:Word) WHERE elementId(w) = $wid
             SET w.arabic_no_diacritics = $no_diac,
-                w.arabic_normalized = $norm,
-                w.arabic_no_fem = $no_fem
-        """, wid=wid, no_diac=no_diac, norm=norm, no_fem=no_fem)
+                w.arabic_normalized = $normalized
+        """, wid=wid, no_diac=no_diac, normalized=normalized)
     return len(updates)
 
 def main():
@@ -94,7 +59,7 @@ def main():
             print(f"✅ Updated {total} words so far")
             time.sleep(0.2)
     driver.close()
-    print(f"🎉 Done. Normalized {total} words.")
+    print(f"🎉 Done. Normalized {total} words using unified normalization pipeline.")
 
 if __name__ == "__main__":
     main()

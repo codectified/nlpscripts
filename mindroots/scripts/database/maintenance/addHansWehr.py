@@ -8,6 +8,10 @@ import time
 from dotenv import load_dotenv
 import os
 
+# Import unified normalization module
+sys.path.append('/Users/omaribrahim/dev/scripts/mindroots/scripts/database/maintenance/current-pipeline')
+from unified_normalization import normalize_arabic, strip_diacritics
+
 # Load environment variables from the .env file
 load_dotenv()
 
@@ -23,15 +27,23 @@ if not all([uri, user, password]):
 # Connect to Neo4j
 driver = GraphDatabase.driver(uri, auth=(user, password))
 
-# Function to match a word node, check for the Hans Wehr entry, and add it if not present
-def add_hanswehr_entry(tx, arabic_no_diacritics, hanswehr_definition):
+# Function to match a word node using unified normalization and add Hans Wehr entry
+def add_hanswehr_entry(tx, hanswehr_word, hanswehr_definition):
+    # Apply unified normalization to Hans Wehr word
+    normalized_word = normalize_arabic(hanswehr_word)
+    no_diac_word = strip_diacritics(hanswehr_word)
+
     query = """
-    MATCH (w:Word {arabic_no_diacritics: $arabic_no_diacritics})
-    WHERE (w.hanswehr_entry) IS NOT NULL  // Ensure we don't overwrite existing entries
+    MATCH (w:Word)
+    WHERE (w.arabic_no_diacritics = $no_diac_word OR w.arabic_normalized = $normalized_word)
+      AND w.hanswehr_entry IS NULL  // Fixed: only set definitions once
     SET w.hanswehr_entry = $hanswehr_definition
     RETURN w.arabic AS word, w.hanswehr_entry AS definition
     """
-    result = tx.run(query, arabic_no_diacritics=arabic_no_diacritics, hanswehr_definition=hanswehr_definition)
+    result = tx.run(query,
+                   no_diac_word=no_diac_word,
+                   normalized_word=normalized_word,
+                   hanswehr_definition=hanswehr_definition)
     return result.single()
 
 # Function to process and add Hans Wehr entries, logging unmatched or corrupt words
@@ -61,7 +73,7 @@ def process_hanswehr_entries(hanswehr_file, unmatched_log_file):
                         unmatched_writer.writerow({'word': hanswehr_word, 'definition': hanswehr_definition})
                         continue
 
-                    # Match and update the word in the Neo4j database
+                    # Match and update the word in the Neo4j database using unified normalization
                     result = session.write_transaction(add_hanswehr_entry, hanswehr_word, hanswehr_definition)
 
                     if result:
