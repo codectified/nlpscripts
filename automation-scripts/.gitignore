@@ -1,0 +1,49 @@
+# Output directories - videos and media files can be large
+output/
+downloads/
+temp/
+
+# Execution logs
+*.log
+execution.log
+
+# Video files (all common formats)
+*.mp4
+*.mkv
+*.webm
+*.avi
+*.mov
+*.flv
+*.wmv
+
+# Audio files
+*.mp3
+*.aac
+*.wav
+*.flac
+*.m4a
+
+# Temporary files
+*.part
+*.tmp
+*~
+.DS_Store
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment files
+.env
+.env.local
+secrets.json
