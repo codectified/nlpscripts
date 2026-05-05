@@ -19,7 +19,8 @@ This document explains your entire system organization across data and automatio
 ├── automation-scripts/          ← All automation tools
 │   ├── video-extraction/        (download basketball clips)
 │   ├── video-conversion/        (MKV → MP4 conversion)
-│   ├── podcast-processing/      (to be created)
+│   ├── podcast-processing/      (audio extraction & chunking)
+│   ├── basketball-analysis/     (frame extraction & shot detection)
 │   └── utilities/
 ├── mindroots/                   (NLP/corpus work)
 ├── nlp/
@@ -98,6 +99,21 @@ This document explains your entire system organization across data and automatio
    ```bash
    /Users/omaribrahim/dev/scripts/automation-scripts/video-extraction/monitor.sh
    ```
+
+### Basketball Frame Analysis
+
+**Status**: Planning phase
+**Documentation**: `/Users/omaribrahim/dev/scripts/automation-scripts/basketball-analysis/PLANNING.md`
+
+1. **Extract action frames** (future)
+   ```bash
+   cd /Users/omaribrahim/dev/scripts/automation-scripts/basketball-analysis
+   source /Users/omaribrahim/dev/scripts/openaibatches/bin/activate
+   python extract_frames.py --input /path/to/video.mp4 --output ./stills/
+   ```
+
+2. **Output location**:
+   - Stills go to: `/Users/omaribrahim/data/hoop-highlights/YYYY-MM-DD/stills/`
 
 ### Podcast Processing
 
@@ -218,6 +234,7 @@ When you add new automations:
 | Podcast processing guide | `/Users/omaribrahim/data/podcasts/README.md` |
 | Podcast inventory | `/Users/omaribrahim/data/podcasts/metadata/PODCAST_MANIFEST.md` |
 | Basketball highlights info | `/Users/omaribrahim/data/hoop-highlights/README.md` |
+| Basketball frame analysis | `/Users/omaribrahim/dev/scripts/automation-scripts/basketball-analysis/PLANNING.md` |
 
 ---
 

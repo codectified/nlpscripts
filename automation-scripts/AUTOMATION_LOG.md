@@ -72,6 +72,43 @@
 
 ## Execution History
 
+### Session 3: Clip Timing Investigation (2025-01-21)
+- **Date**: 2025-01-21
+- **Tasks**: Investigating clip timing issues, cataloging highlights
+- **Status**: In progress - user looking for correct game video
+
+**Video 1 (possibly wrong video):**
+- **File**: `video-extraction/2025-12-22-clips.json`
+- **URL**: https://youtube.com/live/ROkDnL_xlug
+- **Clips**: 14 timestamps saved
+- **Status**: May be wrong video
+
+**Video 2 - 12/2 Game 2 (possibly wrong game, right day):**
+- **Files**:
+  - `video-extraction/2025-12-02-game2-clips.json`
+  - `video-extraction/2025-12-02-game2-clips.csv` (for Google Sheets import)
+- **URL**: https://www.youtube.com/live/I38lm297-io
+- **Clips**: 10 timestamps with play types and some player names
+- **Status**: Waiting for confirmation / user finding right game
+
+**CSV Format for Google Sheets:**
+Columns: clip, start_time, start_sec, end_sec, duration, play_type, player, notes, youtube_link
+- YouTube links go directly to timestamp for easy review
+- Missing data can be filled in by collaborators
+
+**Next Steps**: User looking for correct game from 12/2
+
+### Session 2: December 14 Clip Downloads (2025-12-14)
+- **Date**: 2025-12-14
+- **Tasks**: Downloaded basketball highlight clips
+- **Status**: Completed but with issues
+- **Output**: 9 clips (~28MB total) in 2025-12-14/clips/
+- **Issues Reported**:
+  - Clips appear to be only 5 seconds each
+  - Timing may be offset from intended moments
+  - Possible partial corruption
+- **Note**: Original timestamps not documented - need to rebuild
+
 ### Session 1: Initial Organization
 - **Date**: 2025-11-08
 - **Tasks**: Directory setup, documentation, script organization

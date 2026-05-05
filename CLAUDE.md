@@ -1,5 +1,18 @@
 # MindRoots Scripts Project
 
+## Environment Setup
+
+**Virtual Environment Location:** `/Users/omaribrahim/dev/scripts/openaibatches/`
+
+**Before Running Any Scripts:**
+```bash
+source /Users/omaribrahim/dev/scripts/openaibatches/bin/activate
+cd mindroots
+python script_name.py
+```
+
+The venv is shared across the scripts directory and contains all required dependencies (neo4j, python-dotenv, camel-tools, etc.). Always activate it before running any Python scripts in this project.
+
 ## Overview
 This project contains scripts for processing and linking Arabic corpus data with word nodes in a Neo4j database.
 
